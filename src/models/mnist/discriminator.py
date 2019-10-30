@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 '''
 Discriminator Model Definition
 '''
@@ -51,7 +50,8 @@ class Discriminator(nn.Module):
         self.latent_disc = nn.Sequential(
             nn.Linear(
                 in_features=128, out_features=self.n_c_disc*self.dim_c_disc),
-            nn.Softmax()
+            Reshape(-1, self.n_c_disc, self.dim_c_disc),
+            nn.Softmax(dim=2)
         )
 
         self.latent_cont_mu = nn.Linear(
@@ -63,6 +63,7 @@ class Discriminator(nn.Module):
     def forward(self, z):
         out = self.module_shared(z)
         probability = self.module_D(out)
+        probability = probability.squeeze()
         internal_Q = self.module_Q(out)
         c_disc_logits = self.latent_disc(internal_Q)
         c_cont_mu = self.latent_cont_mu(internal_Q)
