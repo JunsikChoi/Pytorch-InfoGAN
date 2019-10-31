@@ -33,10 +33,30 @@ class Trainer:
         self.project_root = config.project_root
         self.model_name = config.model_name
         self._set_device(self.gpu_id)
+        self._set_plotter(config)
+        self._set_logger()
         self.build_models()
 
     def _set_device(self, gpu_id):
         self.device = torch.device(gpu_id)
+
+    def _set_plotter(self, config):
+        self.plotter = VisdomPlotter(config)
+
+    def _set_logger(self):
+        self.logger = Logger()
+        self.logger.create_target('step', 's', 'iterations')
+        self.logger.create_target('Loss_G', 'G', 'Generator Loss')
+        self.logger.create_target('Loss_D', 'D', 'Discriminator Loss')
+        self.logger.create_target('Loss_Info', 'I', 'Info(G+L_d+L_c) Loss')
+        self.logger.create_target('Loss_Disc', 'I_d', 'Discrete Code Loss')
+        self.logger.create_target(
+            'Loss_Cont', 'I_c_total', 'Continuous Code Loss')
+        for i in range(self.dim_c_cont):
+            self.logger.create_target(
+                'Loss_Cont', f'I_c_{i+1}', 'Continuous Code Loss')
+
+        return
 
     def _sample(self):
         # Sample Z from N(0,1)
@@ -130,10 +150,10 @@ class Trainer:
         else:
             raise NotImplementedError
 
-    def _generate_data(self, z, epoch, idx_c_d, idx_c_c):
+    def plot_generated_data(self, z, epoch, idx_c_d, idx_c_c):
         with torch.no_grad():
             gen_data = self.G(z).detach().cpu()
-        title = f'Fixed_{self.model_name}_E-{epoch}_Cd-{idx_c_d}_Cc-{idx_c_c}'
+        title = f'Fixed_{self.model_name}_E-{epoch+1}_Cd-{idx_c_d}_Cc-{idx_c_c}'
         plt.figure(figsize=(10, 10))
         plt.title(title, fontsize=25)
         # plt.axis("off")
@@ -148,7 +168,7 @@ class Trainer:
         os.makedirs(result_dir, exist_ok=True)
         plt.savefig(os.path.join(result_dir, title+'.png'))
         plt.close('all')
-        return
+        return gen_data, title
 
     def _generate_data2(self, samples, epoch, idx):
             # with torch.no_grad():
@@ -189,10 +209,12 @@ class Trainer:
 
         start_time = time.time()
         num_steps = len(self.data_loader)
+        step = 0
+        log_target = {}
         for epoch in range(self.num_epoch):
             epoch_start_time = time.time()
-            step = 0
             for i, (data, _) in enumerate(self.data_loader, 0):
+
                 if (data.size()[0] != self.batch_size):
                     self.batch_size = data.size()[0]
 
@@ -222,7 +244,7 @@ class Trainer:
 
                 # Calculate gradient -> grad accums to module_shared / modue_D
                 loss_D_fake.backward()
-                loss_D = loss_D_real.item() + loss_D_fake.item()
+                loss_D = loss_D_real + loss_D_fake
 
                 # Update Parameters for D
                 optim_D.step()
@@ -256,8 +278,21 @@ class Trainer:
                 loss_info.backward()
                 optim_G.step()
 
+                # write data to log target
+                self.logger.write('s', step)
+                self.logger.write('G', loss_G.item())
+                self.logger.write('D', loss_D.item())
+                self.logger.write('I', loss_info.item())
+                self.logger.write('I_d', loss_c_disc.item())
+                self.logger.write('I_c_total', loss_c_cont.sum().item())
+                for c in range(self.dim_c_cont):
+                    self.logger.write(f'I_c_{c+1}', loss_c_cont[c].item())
+
                 # Print log info
                 if (step % self.log_step == 0):
+                    self.logger.pour_to_plotter(self.plotter)
+                    self.logger.clear_data()
+
                     print('==========')
                     print(f'Model Name: {self.model_name}')
                     print('Epoch [%d/%d], Step [%d/%d], Elapsed Time: %s \nLoss D : %.4f, Loss Info: %.4f\nLoss_Disc: %.4f Loss_Cont: %.4f Loss_Gen: %.4f'
@@ -265,17 +300,21 @@ class Trainer:
                     for c in range(len(loss_c_cont)):
                         print('Loss of %dth continuous latent code: %.4f' %
                               (c+1, loss_c_cont[c].item()))
+                        # self.plotter.plot_line(
+                        #     'Loss_Cont', f'I_c_{c+1}', 'Continuous Code Loss', step, loss_c_cont[c].item())
                     print(
                         f'Prob_real_D:{prob_real.mean()}, Prob_fake_D:{prob_fake_D.mean()}, Prob_fake_G:{prob_fake.mean()}')
+
                 step += 1
-                if step == 1:
-                    self._generate_data2(
-                        data_fake[:100, ...], epoch=epoch, idx=i+1)
+
+            # Plot and Log generated images
             for key in fixed_z_dict.keys():
                 fixed_z = fixed_z_dict[key].to(self.device)
                 idx_c_disc = key[0]
                 idx_c_cont = key[1]
-                self._generate_data(fixed_z, epoch, idx_c_disc, idx_c_cont)
+                imgs, title = self.plot_generated_data(
+                    fixed_z, epoch, idx_c_disc, idx_c_cont)
+                self.plotter.plot_image_grid(title, imgs, title)
         return
 
     def extract_grad_dict(self, m):

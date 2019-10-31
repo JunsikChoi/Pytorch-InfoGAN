@@ -61,6 +61,8 @@ misc_arg.add_argument('--save_step', type=int, default=10,
                       help="Number of epochs for making checkpoint")
 misc_arg.add_argument('--project_root', type=str, default=get_root())
 misc_arg.add_argument('--model_name', type=str, default='debug')
+misc_arg.add_argument('--visdom_server', type=str,
+                      default='http://192.168.192.11', help="Your visdom server address")
 
 
 def get_config():
