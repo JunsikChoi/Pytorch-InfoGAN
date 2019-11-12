@@ -46,7 +46,7 @@ data_arg.add_argument('--num_worker', type=int, default=12)
 training_arg = add_argument_group('Training')
 training_arg.add_argument('--is_train', type=str2bool, default=True)
 training_arg.add_argument('--optimizer', type=str, default='adam')
-training_arg.add_argument('--num_epoch', type=int, default=100)
+training_arg.add_argument('--num_epoch', type=int, default=20)
 training_arg.add_argument('--lr_G', type=float, default=0.001)
 training_arg.add_argument('--lr_D', type=float, default=0.0002)
 training_arg.add_argument('--beta1', type=float, default=0.5)
@@ -61,8 +61,9 @@ misc_arg.add_argument('--save_step', type=int, default=10,
                       help="Number of epochs for making checkpoint")
 misc_arg.add_argument('--project_root', type=str, default=get_root())
 misc_arg.add_argument('--model_name', type=str, default='Vanila_InfoGAN')
+misc_arg.add_argument('--use_visdom', type=str2bool, default=True)
 misc_arg.add_argument('--visdom_server', type=str,
-                      default='http://192.168.192.11', help="Your visdom server address")
+                      default='http://localhost', help="Your visdom server address")
 
 
 def get_config():
