@@ -67,7 +67,7 @@ class Discriminator(nn.Module):
         internal_Q = self.module_Q(out)
         c_disc_logits = self.latent_disc(internal_Q)
         c_cont_mu = self.latent_cont_mu(internal_Q)
-        c_cont_var = self.latent_cont_var(internal_Q)
+        c_cont_var = torch.exp(self.latent_cont_var(internal_Q))
         return probability, c_disc_logits, c_cont_mu, c_cont_var
 
 
