@@ -25,18 +25,21 @@ class Trainer:
         self.beta1 = config.beta1
         self.beta2 = config.beta2
         self.gpu_id = config.gpu_id
-        self.data_loader = data_loader
         self.num_epoch = config.num_epoch
         self.lambda_disc = config.lambda_disc
         self.lambda_cont = config.lambda_cont
         self.log_step = config.log_step
         self.project_root = config.project_root
         self.model_name = config.model_name
+        self.use_visdom = config.use_visdom
+
+        self.data_loader = data_loader
         self.img_list = {}
         self._set_device(self.gpu_id)
-        self._set_plotter(config)
-        self._set_logger()
         self.build_models()
+        if self.use_visdom:
+            self._set_plotter(config)
+            self._set_logger()
 
     def _set_device(self, gpu_id):
         self.device = torch.device(gpu_id)
@@ -192,8 +195,7 @@ class Trainer:
             epoch_start_time = time.time()
             step_epoch = 0
             for i, (data, _) in enumerate(self.data_loader, 0):
-                if i > 10:
-                    break
+
                 if (data.size()[0] != self.batch_size):
                     self.batch_size = data.size()[0]
 
@@ -255,21 +257,23 @@ class Trainer:
                 optim_G.step()
 
                 # write data to log target
-                self.logger.write('s', step)
-                self.logger.write('G', loss_G.item())
-                self.logger.write('D', loss_D.item())
-                self.logger.write('I', loss_info.item())
-                self.logger.write('I_d', loss_c_disc.item())
-                self.logger.write('P_d_real', prob_fake_D.mean().item())
-                self.logger.write('P_d_fake', prob_real.mean().item())
-                self.logger.write('I_c_total', loss_c_cont.sum().item())
-                for c in range(self.dim_c_cont):
-                    self.logger.write(f'I_c_{c+1}', loss_c_cont[c].item())
+                if self.use_visdom:
+                    self.logger.write('s', step)
+                    self.logger.write('G', loss_G.item())
+                    self.logger.write('D', loss_D.item())
+                    self.logger.write('I', loss_info.item())
+                    self.logger.write('I_d', loss_c_disc.item())
+                    self.logger.write('P_d_real', prob_fake_D.mean().item())
+                    self.logger.write('P_d_fake', prob_real.mean().item())
+                    self.logger.write('I_c_total', loss_c_cont.sum().item())
+                    for c in range(self.dim_c_cont):
+                        self.logger.write(f'I_c_{c+1}', loss_c_cont[c].item())
 
                 # Print log info
                 if (step % self.log_step == 0):
-                    self.logger.pour_to_plotter(self.plotter)
-                    self.logger.clear_data()
+                    if self.use_visdom:
+                        self.logger.pour_to_plotter(self.plotter)
+                        self.logger.clear_data()
 
                     print('==========')
                     print(f'Model Name: {self.model_name}')
@@ -299,7 +303,8 @@ class Trainer:
                     imgs, nrow=10, padding=2, normalize=True)
 
                 # Log Image
-                self.plotter.plot_image_grid(title, imgs, title)
+                if self.use_visdom:
+                    self.plotter.plot_image_grid(title, imgs, title)
 
             # Save checkpoint
             self.save_model(epoch+1)
