@@ -106,9 +106,13 @@ python src/main.py --use_visdom False
 - y-axis : each category of discrete variable from 0~9
 
 ##### Latent Traversal for continuous latent code index = 1
+Representing Rotation
+
 ![Latent Traversal for continuous latent code index = 1](./examples/latent_traversal_c_1.png)
 
 ##### Latent Traversal for continuous latent code index = 2
+Representing Width
+
 ![Latent Traversal for continuous latent code index = 2](./examples/latent_traversal_c_2.png)
 
 #### Animated results of fixed latent setting during training
