@@ -1,18 +1,38 @@
 import torch
 import numpy as np
+import os
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import torchvision.utils as vutils
+import json
 from visdom import Visdom
+
+# Custom functions for training
 
 
 class NLL_gaussian:
-    def __call__(self, x, mu, sigma):
+    def __call__(self, x, mu, var):
         '''
         Compute negative log-likelihood for Gaussian distribution
         '''
+        eps = 1e-6
         l = (x - mu) ** 2
-        l /= (2 * sigma ** 2)
-        l += 0.5 * torch.log(sigma ** 2) + 0.5 * np.log(2 * np.pi)
+        l /= (2 * var + eps)
+        l += 0.5 * torch.log(2 * np.pi * var + eps)
+
         return l
 
+
+def weights_init_normal(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        torch.nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("BatchNorm") != -1:
+        torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
+        torch.nn.init.constant_(m.bias.data, 0.0)
+
+
+# Logging and Plotting
 
 class Logger(object):
     def __init__(self):
@@ -93,10 +113,101 @@ class VisdomPlotter(object):
             return
 
 
-def weights_init_normal(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        torch.nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("BatchNorm") != -1:
-        torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
-        torch.nn.init.constant_(m.bias.data, 0.0)
+def make_animation(config, end_epoch, n_c_disc, dim_c_cont, img_list):
+
+    font = {'family': 'serif',
+            'color':  'black',
+            'weight': 'normal',
+            'size': 16, }
+
+    save_dir = os.path.join(
+        config.project_root, f'results/{config.model_name}/gifs')
+    os.makedirs(save_dir, exist_ok=True)
+
+    for c_d in range(n_c_disc):
+        for c_c in range(dim_c_cont):
+            fig = plt.figure(figsize=(10, 10))
+            plt.xticks([])
+            plt.yticks([])
+            plt.xlabel(f'Continuous Code Index = {c_c+1}', fontsize=20)
+            plt.ylabel(f'Discrete Code Index = {c_d+1}', fontsize=20)
+            ims = []
+            for epoch in range(end_epoch+1):
+                im = plt.imshow(np.transpose(
+                    img_list[(epoch, c_d, c_c)].numpy(), (1, 2, 0)), animated=True)
+                title = plt.text(
+                    150, -10, f'Generated Images at Epoch: {epoch+1}', horizontalalignment='center', fontdict=font)
+                ims.append([im, title])
+                del(title)
+            anim = animation.ArtistAnimation(
+                fig, ims, interval=1000, repeat_delay=1000, blit=True)
+            anim.save(
+                f'{save_dir}/{config.model_name}-Cd_{c_d+1}-Cc_{c_c+1}.gif', dpi=80, writer='imagemagick')
+            plt.show()
+
+    return
+
+
+def plot_generated_data(config, generator, z, epoch, idx_c_d, idx_c_c):
+    with torch.no_grad():
+        gen_data = generator(z).detach().cpu()
+    title = f'Fixed_{config.model_name}_E-{epoch+1}_Cd-{idx_c_d}_Cc-{idx_c_c}'
+    plt.figure(figsize=(10, 10))
+    plt.title(title, fontsize=25)
+    plt.xticks([])
+    plt.yticks([])
+    plt.xlabel(f'Continuous Code Index = {idx_c_c}', fontsize=20)
+    plt.ylabel(f'Discrete Code Index = {idx_c_d}', fontsize=20)
+    plt.imshow(np.transpose(vutils.make_grid(
+        gen_data, nrow=10, padding=2, normalize=True), (1, 2, 0)))
+    result_dir = os.path.join(
+        config.project_root, 'results', config.model_name, 'images')
+    os.makedirs(result_dir, exist_ok=True)
+    plt.savefig(os.path.join(result_dir, title+'.png'))
+    plt.close('all')
+    return gen_data, title
+
+
+# For debugging
+
+# Extract existing gradient dictionary from model m
+def extract_grad_dict(m):
+    param_dict = {}
+    for name, param in m.named_parameters():
+        if param.grad is None:
+            param_dict[name] = None
+        else:
+            param_dict[name] = param.grad.clone()
+    return param_dict
+
+# Compare two gradient dictionary
+
+
+def compare_grad(d1, d2):
+    different_name = []
+    for key in d1.keys():
+        if d1[key] is None:
+            if d2[key] is not None:
+                different_name.append(key)
+            else:
+                pass
+        else:
+            if not torch.equal(d1[key], d2[key]):
+                different_name.append(key)
+    if len(different_name) == 0:
+        print("Same grad!")
+    return different_name
+
+# MISC
+
+
+def save_config(config):
+
+    save_dir = os.path.join(
+        config.project_root, f'results/{config.model_name}')
+    os.makedirs(save_dir, exist_ok=True)
+
+    with open(f'{save_dir}/config.json', 'w') as fp:
+        json.dump(config.__dict__, fp, indent=4, sort_keys=True)
+
+    return

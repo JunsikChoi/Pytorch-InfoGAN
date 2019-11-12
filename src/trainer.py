@@ -4,7 +4,6 @@ import numpy as np
 import time
 import datetime
 import itertools
-import matplotlib.pyplot as plt
 import torchvision.utils as vutils
 from utils import *
 from models.mnist.discriminator import Discriminator
@@ -14,6 +13,7 @@ torch.autograd.set_detect_anomaly(True)
 
 class Trainer:
     def __init__(self, config, data_loader):
+        self.config = config
         self.n_c_disc = config.n_c_disc
         self.dim_c_disc = config.dim_c_disc
         self.dim_c_cont = config.dim_c_cont
@@ -32,6 +32,7 @@ class Trainer:
         self.log_step = config.log_step
         self.project_root = config.project_root
         self.model_name = config.model_name
+        self.img_list = {}
         self._set_device(self.gpu_id)
         self._set_plotter(config)
         self._set_logger()
@@ -50,6 +51,10 @@ class Trainer:
         self.logger.create_target('Loss_D', 'D', 'Discriminator Loss')
         self.logger.create_target('Loss_Info', 'I', 'Info(G+L_d+L_c) Loss')
         self.logger.create_target('Loss_Disc', 'I_d', 'Discrete Code Loss')
+        self.logger.create_target(
+            'Prob_D', 'P_d_real', 'Prob of D for real / fake sample')
+        self.logger.create_target(
+            'Prob_D', 'P_d_fake', 'Prob of D for real / fake sample')
         self.logger.create_target(
             'Loss_Cont', 'I_c_total', 'Continuous Code Loss')
         for i in range(self.dim_c_cont):
@@ -150,60 +155,32 @@ class Trainer:
         else:
             raise NotImplementedError
 
-    def plot_generated_data(self, z, epoch, idx_c_d, idx_c_c):
-        with torch.no_grad():
-            gen_data = self.G(z).detach().cpu()
-        title = f'Fixed_{self.model_name}_E-{epoch+1}_Cd-{idx_c_d}_Cc-{idx_c_c}'
-        plt.figure(figsize=(10, 10))
-        plt.title(title, fontsize=25)
-        # plt.axis("off")
-        plt.xticks([])
-        plt.yticks([])
-        plt.xlabel(f'Continuous Code Index = {idx_c_c}', fontsize=20)
-        plt.ylabel(f'Discrete Code Index = {idx_c_d}', fontsize=20)
-        plt.imshow(np.transpose(vutils.make_grid(
-            gen_data, nrow=10, padding=2, normalize=True), (1, 2, 0)))
-        result_dir = os.path.join(
-            self.project_root, 'results', self.model_name)
-        os.makedirs(result_dir, exist_ok=True)
-        plt.savefig(os.path.join(result_dir, title+'.png'))
-        plt.close('all')
-        return gen_data, title
+    def save_model(self, epoch):
+        save_dir = os.path.join(
+            self.project_root, f'results/{self.model_name}/checkpoint')
+        os.makedirs(save_dir, exist_ok=True)
 
-    def _generate_data2(self, samples, epoch, idx):
-            # with torch.no_grad():
-                # gen_data = self.G(z).detach().cpu()
-        gen_data = samples.detach().cpu()
-        plt.figure(figsize=(10, 10))
-        plt.axis("off")
-        plt.imshow(np.transpose(vutils.make_grid(
-            gen_data, nrow=10, padding=2, normalize=True), (1, 2, 0)))
-        result_dir = os.path.join(
-            self.project_root, 'results', self.model_name)
-        os.makedirs(result_dir, exist_ok=True)
-        title = f'{self.model_name}-Epoch_{epoch}-C_disc_{idx}.png'
-        plt.savefig(os.path.join(result_dir, title))
-        plt.close('all')
+        # Save network weights.
+        torch.save({
+            'Generator': self.G.state_dict(),
+            'Discriminator': self.D.state_dict(),
+            'configuations': self.config
+        }, f'{save_dir}/Epoch_{epoch}.pth')
+
         return
 
     def train(self):
         # Set opitmizers
         optim_G = self.set_optimizer([self.G.parameters(), self.D.module_Q.parameters(
         ), self.D.latent_disc.parameters(), self.D.latent_cont_mu.parameters()], lr=self.lr_G)
-        # , self.D.latent_cont_var.parameters()
         optim_D = self.set_optimizer(
             [self.D.module_shared.parameters(), self.D.module_D.parameters()], lr=self.lr_D)
-        # optim_G = self.set_optimizer(
-        #     [self.G.parameters(), self.D.parameters()])
-        # optim_D = self.set_optimizer([self.D.parameters()])
-        # optim_Info = self.set_optimizer(
-        #     [self.G.parameters(), self.D.parameters()])
 
         # Loss functions
         adversarial_loss = torch.nn.BCELoss()
         categorical_loss = torch.nn.CrossEntropyLoss()
-        # continuous_loss = NLL_gaussian()
-        continuous_loss = torch.nn.MSELoss(reduction='none')
+        continuous_loss = NLL_gaussian()
+
         # Sample fixed latent codes for comparison
         fixed_z_dict = self._sample_fixed_noise()
 
@@ -213,8 +190,10 @@ class Trainer:
         log_target = {}
         for epoch in range(self.num_epoch):
             epoch_start_time = time.time()
+            step_epoch = 0
             for i, (data, _) in enumerate(self.data_loader, 0):
-
+                if i > 10:
+                    break
                 if (data.size()[0] != self.batch_size):
                     self.batch_size = data.size()[0]
 
@@ -223,8 +202,8 @@ class Trainer:
                 # Update Discriminator
                 # Reset optimizer
                 optim_D.zero_grad()
-                # Calculate Loss D(real)
 
+                # Calculate Loss D(real)
                 prob_real, _, _, _ = self.D(data_real)
                 label_real = torch.full(
                     (self.batch_size,), 1, device=self.device)
@@ -254,7 +233,7 @@ class Trainer:
                 optim_G.zero_grad()
 
                 # Calculate loss for generator
-                prob_fake, disc_logits, mu, sigma = self.D(data_fake)
+                prob_fake, disc_logits, mu, var = self.D(data_fake)
                 loss_G = adversarial_loss(prob_fake, label_real)
 
                 # Calculate loss for discrete latent code
@@ -266,15 +245,12 @@ class Trainer:
                 loss_c_disc = loss_c_disc * self.lambda_disc
 
                 # Calculate loss for continuous latent code
-                # loss_c_cont = continuous_loss(
-                # z[:, self.dim_z+self.n_c_disc*self.dim_c_disc:], mu, sigma).mean(0)
                 loss_c_cont = continuous_loss(
-                    mu, z[:, self.dim_z+self.n_c_disc*self.dim_c_disc:]).mean(dim=0)
+                    z[:, self.dim_z+self.n_c_disc*self.dim_c_disc:], mu, var).mean(0)
+
                 loss_c_cont = loss_c_cont * self.lambda_cont
 
                 loss_info = loss_G + loss_c_disc + loss_c_cont.sum()
-                # loss_info = loss_G
-                # loss_info = loss_G + loss_c_disc
                 loss_info.backward()
                 optim_G.step()
 
@@ -284,6 +260,8 @@ class Trainer:
                 self.logger.write('D', loss_D.item())
                 self.logger.write('I', loss_info.item())
                 self.logger.write('I_d', loss_c_disc.item())
+                self.logger.write('P_d_real', prob_fake_D.mean().item())
+                self.logger.write('P_d_fake', prob_real.mean().item())
                 self.logger.write('I_c_total', loss_c_cont.sum().item())
                 for c in range(self.dim_c_cont):
                     self.logger.write(f'I_c_{c+1}', loss_c_cont[c].item())
@@ -296,50 +274,40 @@ class Trainer:
                     print('==========')
                     print(f'Model Name: {self.model_name}')
                     print('Epoch [%d/%d], Step [%d/%d], Elapsed Time: %s \nLoss D : %.4f, Loss Info: %.4f\nLoss_Disc: %.4f Loss_Cont: %.4f Loss_Gen: %.4f'
-                          % (epoch + 1, self.num_epoch, step, num_steps, datetime.timedelta(seconds=time.time()-start_time), loss_D, loss_info.item(), loss_c_disc.item(), loss_c_cont.sum().item(), loss_G.item()))
+                          % (epoch + 1, self.num_epoch, step_epoch, num_steps, datetime.timedelta(seconds=time.time()-start_time), loss_D, loss_info.item(), loss_c_disc.item(), loss_c_cont.sum().item(), loss_G.item()))
                     for c in range(len(loss_c_cont)):
                         print('Loss of %dth continuous latent code: %.4f' %
                               (c+1, loss_c_cont[c].item()))
-                        # self.plotter.plot_line(
-                        #     'Loss_Cont', f'I_c_{c+1}', 'Continuous Code Loss', step, loss_c_cont[c].item())
                     print(
                         f'Prob_real_D:{prob_real.mean()}, Prob_fake_D:{prob_fake_D.mean()}, Prob_fake_G:{prob_fake.mean()}')
 
                 step += 1
+                step_epoch += 1
 
             # Plot and Log generated images
             for key in fixed_z_dict.keys():
                 fixed_z = fixed_z_dict[key].to(self.device)
                 idx_c_disc = key[0]
                 idx_c_cont = key[1]
-                imgs, title = self.plot_generated_data(
-                    fixed_z, epoch, idx_c_disc, idx_c_cont)
+
+                # Generate and plot images from fixed inputs
+                imgs, title = plot_generated_data(
+                    self.config, self.G, fixed_z, epoch, idx_c_disc, idx_c_cont)
+
+                # collect images for animation
+                self.img_list[(epoch, key[0], key[1])] = vutils.make_grid(
+                    imgs, nrow=10, padding=2, normalize=True)
+
+                # Log Image
                 self.plotter.plot_image_grid(title, imgs, title)
+
+            # Save checkpoint
+            self.save_model(epoch+1)
+
+        # Make and save animation
+        make_animation(self.config, epoch, self.n_c_disc,
+                       self.dim_c_cont, self.img_list)
         return
-
-    def extract_grad_dict(self, m):
-        param_dict = {}
-        for name, param in m.named_parameters():
-            if param.grad is None:
-                param_dict[name] = None
-            else:
-                param_dict[name] = param.grad.clone()
-        return param_dict
-
-    def compare_grad(self, d1, d2):
-        different_name = []
-        for key in d1.keys():
-            if d1[key] is None:
-                if d2[key] is not None:
-                    different_name.append(key)
-                else:
-                    pass
-            else:
-                if not torch.equal(d1[key], d2[key]):
-                    different_name.append(key)
-        if len(different_name) == 0:
-            print("Same grad!")
-        return different_name
 
     def test(self):
         pass
