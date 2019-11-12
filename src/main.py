@@ -1,13 +1,12 @@
 import torch
-
+from utils import save_config
 from trainer import Trainer
 from config import get_config
 from data_loader import get_loader
 
 
 def main(config):
-    print(config)
-
+    save_config(config)
     data_loader = get_loader(config.batch_size, config.project_root)
     trainer = Trainer(config, data_loader)
     trainer.train()
