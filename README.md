@@ -5,7 +5,7 @@ This is my implementation of paper [InfoGAN](https://arxiv.org/abs/1606.03657).
 - OS: Ubuntu 16.04
 - GPU: Nvidia GTX 1080Ti
 - Nvidia GPU Driver: 418.87.01
-- CUDA: 10.1
+- CUDA: 9.2
 - Python: 3.6.8
 - Pytorch: 1.3.0
 - torchvision==0.4.1
