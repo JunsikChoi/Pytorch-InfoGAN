@@ -1,7 +1,9 @@
 ref/
 .vscode/
-data/
-results/
+data/*
+!data/.keep
+results/*
+!results/.keep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
