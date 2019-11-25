@@ -6,8 +6,10 @@ import datetime
 import itertools
 import torchvision.utils as vutils
 from utils import *
-from models.mnist.discriminator import Discriminator
-from models.mnist.generator import Generator
+# from models.mnist.discriminator import Discriminator
+# from models.mnist.generator import Generator
+from models.mnist_modified.discriminator import Discriminator
+from models.mnist_modified.generator import Generator
 torch.autograd.set_detect_anomaly(True)
 
 
@@ -263,8 +265,8 @@ class Trainer:
                     self.logger.write('D', loss_D.item())
                     self.logger.write('I', loss_info.item())
                     self.logger.write('I_d', loss_c_disc.item())
-                    self.logger.write('P_d_real', prob_fake_D.mean().item())
-                    self.logger.write('P_d_fake', prob_real.mean().item())
+                    self.logger.write('P_d_real', prob_real.mean().item())
+                    self.logger.write('P_d_fake', prob_fake_D.mean().item())
                     self.logger.write('I_c_total', loss_c_cont.sum().item())
                     for c in range(self.dim_c_cont):
                         self.logger.write(f'I_c_{c+1}', loss_c_cont[c].item())
